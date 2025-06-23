@@ -201,9 +201,9 @@ def sample_and_test(args):
         source_data = to_range_0_1(source_data); source_data = source_data/source_data.max() 
         
         
-        fake_sample1 = crop(fake_sample1) 
-        real_data = crop(real_data)
-        source_data = crop(source_data) 
+        #fake_sample1 = crop(fake_sample1) 
+        #real_data = crop(real_data)
+        #source_data = crop(source_data) 
         syn_im1[:,:,iteration]=np.squeeze(fake_sample1.cpu().numpy())
         
         loss1[0, iteration] = psnr(fake_sample1, real_data).cpu().numpy()
@@ -225,11 +225,9 @@ def sample_and_test(args):
         real_data = to_range_0_1(real_data) ; real_data = real_data/real_data.max()
         source_data = to_range_0_1(source_data); source_data = source_data/source_data.max() 
         
-        
-        
-        fake_sample2 = crop(fake_sample2) 
-        real_data = crop(real_data)
-        source_data = crop(source_data)
+        #fake_sample2 = crop(fake_sample2) 
+        #real_data = crop(real_data)
+        #source_data = crop(source_data)
         syn_im2[:,:,iteration]=np.squeeze(fake_sample2.cpu().numpy()) 
         
         loss2[0, iteration] = psnr(fake_sample2, real_data).cpu().numpy()
