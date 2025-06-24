@@ -10,14 +10,12 @@ class SynDiffDataset(torch.utils.data.Dataset):
     def __init__(self, phase, input_path, contrast1='T1', contrast2='T2'):
         self.phase = phase
         self.input_path = input_path
-        # Open the tar files for T1 and T2
         self.tar_t1 = tarfile.open(os.path.join(input_path, f'IXI-{contrast1}.tar'), 'r')
         self.tar_t2 = tarfile.open(os.path.join(input_path, f'IXI-{contrast2}.tar'), 'r')
         self.contrast1_files = [f for f in self.tar_t1.getnames() if f.endswith('.nii.gz') and contrast1 in os.path.basename(f)]
         self.contrast2_files = [f for f in self.tar_t2.getnames() if f.endswith('.nii.gz') and contrast2 in os.path.basename(f)]
         self.padding = True
         self.Norm = True
-        # Dynamically determine slice count from the first valid file
         self.num_slices = 0
         if self.contrast1_files:
             try:
@@ -38,49 +36,60 @@ class SynDiffDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         if not self.contrast1_files or not self.contrast2_files:
             raise ValueError("No valid files found in tar archives.")
-        file_idx1 = idx // (100 // 2)  # Assuming ~100 slices per volume, use middle 50
-        slice_idx = idx % (100 // 2) + (100 // 4)  # Middle 50% slices
-        file_idx2 = np.random.randint(0, len(self.contrast2_files))  # Random T2 for unpaired
+        max_retries = 3  # Limit retry attempts
+        retry_count = 0
 
-        # Load T1 (target) from tar
-        file_path1 = self.contrast1_files[file_idx1 % len(self.contrast1_files)]
-        file1 = self.tar_t1.extractfile(file_path1)
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.nii.gz') as tmp_file:
-            try:
-                tmp_file.write(file1.read())
-                tmp_file_path = tmp_file.name
-                data1 = self.LoadDataSet(tmp_file_path)
-                x = data1[slice_idx % data1.shape[0]]  # Get specific slice
-            except Exception as e:
-                print(f"Error loading T1 file {file_path1}: {e}")
-                return self.__getitem__((idx + 1) % self.num_slices)  # Retry with next index
-            finally:
-                os.unlink(tmp_file_path)
+        while retry_count < max_retries:
+            file_idx1 = idx // (100 // 2)
+            slice_idx = idx % (100 // 2) + (100 // 4)
+            file_idx2 = np.random.randint(0, len(self.contrast2_files))
 
-        # Load T2 (source/conditioning) from tar
-        file_path2 = self.contrast2_files[file_idx2]
-        file2 = self.tar_t2.extractfile(file_path2)
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.nii.gz') as tmp_file:
-            try:
-                tmp_file.write(file2.read())
-                tmp_file_path = tmp_file.name
-                data2 = self.LoadDataSet(tmp_file_path)
-                y = data2[slice_idx % data2.shape[0]]  # Matching slice index
-            except Exception as e:
-                print(f"Error loading T2 file {file_path2}: {e}")
-                return self.__getitem__((idx + 1) % self.num_slices)  # Retry with next index
-            finally:
-                os.unlink(tmp_file_path)
+            file_path1 = self.contrast1_files[file_idx1 % len(self.contrast1_files)]
+            file1 = self.tar_t1.extractfile(file_path1)
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.nii.gz') as tmp_file:
+                try:
+                    tmp_file.write(file1.read())
+                    tmp_file_path = tmp_file.name
+                    data1 = self.LoadDataSet(tmp_file_path)
+                    x = data1[slice_idx % data1.shape[0]]
+                except Exception as e:
+                    print(f"Error loading T1 file {file_path1}: {e}")
+                    os.unlink(tmp_file_path)
+                    retry_count += 1
+                    if retry_count == max_retries:
+                        raise  # Raise exception after max retries
+                    continue  # Try next index
+                finally:
+                    os.unlink(tmp_file_path)
 
-        return x, y
+            file_path2 = self.contrast2_files[file_idx2]
+            file2 = self.tar_t2.extractfile(file_path2)
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.nii.gz') as tmp_file:
+                try:
+                    tmp_file.write(file2.read())
+                    tmp_file_path = tmp_file.name
+                    data2 = self.LoadDataSet(tmp_file_path)
+                    y = data2[slice_idx % data2.shape[0]]
+                except Exception as e:
+                    print(f"Error loading T2 file {file_path2}: {e}")
+                    os.unlink(tmp_file_path)
+                    retry_count += 1
+                    if retry_count == max_retries:
+                        raise  # Raise exception after max retries
+                    continue  # Try next index
+                finally:
+                    os.unlink(tmp_file_path)
+
+            return x, y
+
+        raise RuntimeError("Max retries exceeded for loading data.")
 
     def LoadDataSet(self, file_path):
+        img = nib.load(file_path)
+        data = img.get_fdata()  # 3D array [x, y, z]
+
         # Use tqdm to show progress for slice extraction
         with tqdm(total=data.shape[2], desc="Extracting slices") as pbar:
-            img = nib.load(file_path)
-            data = img.get_fdata()  # 3D array [x, y, z]
-
-            # Extract 2D slices
             slices = []
             for z in range(data.shape[2]):
                 slice_data = data[:, :, z]
@@ -102,7 +111,7 @@ class SynDiffDataset(torch.utils.data.Dataset):
             if self.Norm:
                 pbar.set_description("Normalizing data")
                 data = (data - np.mean(data)) / np.std(data)  # Zero mean, unit variance
-                data = data * 2 - 1  # Scale to [-1, 1] to match test.py's range
+                data = data * 2 - 1  # Scale to [-1, 1]
 
         return data
 
