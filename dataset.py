@@ -4,7 +4,6 @@ import nibabel as nib
 import os
 import tarfile
 import tempfile
-from tqdm import tqdm
 
 class SynDiffDataset(torch.utils.data.Dataset):
     def __init__(self, phase, input_path, contrast1='T1', contrast2='T2'):
@@ -36,7 +35,7 @@ class SynDiffDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         if not self.contrast1_files or not self.contrast2_files:
             raise ValueError("No valid files found in tar archives.")
-        max_retries = 3  # Limit retry attempts
+        max_retries = 3
         retry_count = 0
 
         while retry_count < max_retries:
@@ -57,8 +56,8 @@ class SynDiffDataset(torch.utils.data.Dataset):
                     os.unlink(tmp_file_path)
                     retry_count += 1
                     if retry_count == max_retries:
-                        raise  # Raise exception after max retries
-                    continue  # Try next index
+                        raise
+                    continue
                 finally:
                     os.unlink(tmp_file_path)
 
@@ -75,8 +74,8 @@ class SynDiffDataset(torch.utils.data.Dataset):
                     os.unlink(tmp_file_path)
                     retry_count += 1
                     if retry_count == max_retries:
-                        raise  # Raise exception after max retries
-                    continue  # Try next index
+                        raise
+                    continue
                 finally:
                     os.unlink(tmp_file_path)
 
@@ -88,30 +87,24 @@ class SynDiffDataset(torch.utils.data.Dataset):
         img = nib.load(file_path)
         data = img.get_fdata()  # 3D array [x, y, z]
 
-        # Use tqdm to show progress for slice extraction
-        with tqdm(total=data.shape[2], desc="Extracting slices") as pbar:
-            slices = []
-            for z in range(data.shape[2]):
-                slice_data = data[:, :, z]
-                slice_data = np.expand_dims(slice_data, axis=0)  # Add channel dim [1, 256, 256]
-                slices.append(slice_data)
-                pbar.update(1)
-            data = np.stack(slices, axis=0)  # Shape [num_slices, 1, 256, 256]
+        slices = []
+        for z in range(data.shape[2]):
+            slice_data = data[:, :, z]
+            slice_data = np.expand_dims(slice_data, axis=0)  # Add channel dim [1, 256, 256]
+            slices.append(slice_data)
+        data = np.stack(slices, axis=0)  # Shape [num_slices, 1, 256, 256]
 
-            # Convert to float32
-            data = data.astype(np.float32)
+        data = data.astype(np.float32)
 
-            if self.padding:
-                pad_x = int((256 - data.shape[2]) / 2)
-                pad_y = int((256 - data.shape[3]) / 2)
-                if pad_x > 0 or pad_y > 0:
-                    pbar.set_description("Padding slices")
-                    data = np.pad(data, ((0, 0), (0, 0), (pad_x, pad_x), (pad_y, pad_y)))
+        if self.padding:
+            pad_x = int((256 - data.shape[2]) / 2)
+            pad_y = int((256 - data.shape[3]) / 2)
+            if pad_x > 0 or pad_y > 0:
+                data = np.pad(data, ((0, 0), (0, 0), (pad_x, pad_x), (pad_y, pad_y)))
 
-            if self.Norm:
-                pbar.set_description("Normalizing data")
-                data = (data - np.mean(data)) / np.std(data)  # Zero mean, unit variance
-                data = data * 2 - 1  # Scale to [-1, 1]
+        if self.Norm:
+            data = (data - np.mean(data)) / np.std(data)  # Zero mean, unit variance
+            data = data * 2 - 1  # Scale to [-1, 1]
 
         return data
 
