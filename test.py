@@ -8,6 +8,7 @@ import torch.optim as optim
 import torchvision
 from backbones.ncsnpp_generator_adagn import NCSNpp
 from dataset import CreateDatasetSynthesis
+from saved_dataset import SavedDataset
 
 import torch.nn.functional as F
 
@@ -156,11 +157,11 @@ def sample_and_test(args):
 
     #loading dataset
     phase='test'
-    dataset=CreateDatasetSynthesis('test', args.input_path, args.contrast1, args.contrast2)
+    dataset = SavedDataset(file_path=os.path.join(args.input_path, "IXI_processed_dataset_full.npy"))
     data_loader = torch.utils.data.DataLoader(dataset,
                                                batch_size=1,
                                                shuffle=False,
-                                               num_workers=4)
+                                               num_workers=2)
     #Initializing and loading network
     gen_diffusive_1 = NCSNpp(args).to(device)
     gen_diffusive_2 = NCSNpp(args).to(device)
