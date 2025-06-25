@@ -7,8 +7,7 @@ import os
 import torch.optim as optim
 import torchvision
 from backbones.ncsnpp_generator_adagn import NCSNpp
-from dataset import CreateDatasetSynthesis
-from dataset_original import CreateDatasetSynthesis_original
+from dataset_big import CreateDatasetSynthesis
 from saved_dataset import SavedDataset
 
 from torch.utils.data import Subset
@@ -160,7 +159,7 @@ def sample_and_test(args):
 
     #loading dataset
     phase='test'
-    dataset = SavedDataset(file_path=os.path.join(args.input_path, "IXI_processed_dataset_full.npy"))
+    dataset = CreateDatasetSynthesis(phase, args.input_path, contrast1=args.contrast1, contrast2=args.contrast2, max_slices=10)
     if args.num_test_samples is not None:
         dataset = Subset(dataset, range(args.num_test_samples))
 
