@@ -79,6 +79,15 @@ def _load_from_tar(tar_path, selected_members, max_slices=None, normalize=True, 
     return data
 
 
+from nibabel import orientations
+
+def _reorient_to_RAS(data, affine):
+    orig_ornt = orientations.io_orientation(affine)
+    ras_ornt = orientations.axcodes2ornt(('R', 'A', 'S'))
+    transform = orientations.ornt_transform(orig_ornt, ras_ornt)
+    return orientations.apply_orientation(data, transform)
+
+
 def CreateDatasetSynthesis(phase, input_path, contrast1="T1", contrast2="T2", max_slices=None, size=256):
     tar_path1 = os.path.join(input_path, f"IXI_{contrast1}.tar")
     tar_path2 = os.path.join(input_path, f"IXI_{contrast2}.tar")
@@ -86,7 +95,7 @@ def CreateDatasetSynthesis(phase, input_path, contrast1="T1", contrast2="T2", ma
     if nib is None:
         raise ImportError("nibabel is required")
 
-    # Open beide tar-bestanden
+    # Open tar-bestanden
     with tarfile.open(tar_path1, "r") as tar1, tarfile.open(tar_path2, "r") as tar2:
         members1 = [m for m in tar1.getmembers() if m.isfile()]
         members2 = [m for m in tar2.getmembers() if m.isfile()]
@@ -95,7 +104,7 @@ def CreateDatasetSynthesis(phase, input_path, contrast1="T1", contrast2="T2", ma
         subjects1 = { _extract_subject_id(m.name): m for m in members1 if _extract_subject_id(m.name) }
         subjects2 = { _extract_subject_id(m.name): m for m in members2 if _extract_subject_id(m.name) }
 
-        # Matchende subjects
+        # Gemeenschappelijke subjects
         common_subjects = sorted(set(subjects1.keys()) & set(subjects2.keys()))
 
         x_list, y_list = [], []
@@ -119,10 +128,10 @@ def CreateDatasetSynthesis(phase, input_path, contrast1="T1", contrast2="T2", ma
 
             img1 = nib.Nifti1Image.from_bytes(bytes1)
             img2 = nib.Nifti1Image.from_bytes(bytes2)
-            vol1 = img1.get_fdata()
-            vol2 = img2.get_fdata()
 
-            # Zorg dat shapes gelijk zijn in z
+            vol1 = _reorient_to_RAS(img1.get_fdata(), img1.affine)
+            vol2 = _reorient_to_RAS(img2.get_fdata(), img2.affine)
+
             z_len = min(vol1.shape[2], vol2.shape[2])
             z0 = z_len // 4
             z1 = z_len - z0
@@ -139,11 +148,10 @@ def CreateDatasetSynthesis(phase, input_path, contrast1="T1", contrast2="T2", ma
             if max_slices is not None and count >= max_slices:
                 break
 
-    # Stapel en normaliseer
+    # Stack en normaliseer
     x = np.stack(x_list)[:, None, :, :]
     y = np.stack(y_list)[:, None, :, :]
 
-    # Normaliseren
     for arr in [x, y]:
         arr -= arr.min()
         if arr.max() > 0:
