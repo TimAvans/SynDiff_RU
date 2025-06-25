@@ -83,24 +83,72 @@ def CreateDatasetSynthesis(phase, input_path, contrast1="T1", contrast2="T2", ma
     tar_path1 = os.path.join(input_path, f"IXI_{contrast1}.tar")
     tar_path2 = os.path.join(input_path, f"IXI_{contrast2}.tar")
 
+    if nib is None:
+        raise ImportError("nibabel is required")
+
+    # Open beide tar-bestanden
     with tarfile.open(tar_path1, "r") as tar1, tarfile.open(tar_path2, "r") as tar2:
         members1 = [m for m in tar1.getmembers() if m.isfile()]
         members2 = [m for m in tar2.getmembers() if m.isfile()]
 
+        # Subject ID → member mapping
         subjects1 = { _extract_subject_id(m.name): m for m in members1 if _extract_subject_id(m.name) }
         subjects2 = { _extract_subject_id(m.name): m for m in members2 if _extract_subject_id(m.name) }
 
+        # Matchende subjects
         common_subjects = sorted(set(subjects1.keys()) & set(subjects2.keys()))
 
-        selected1 = [subjects1[s] for s in common_subjects]
-        selected2 = [subjects2[s] for s in common_subjects]
+        x_list, y_list = [], []
+        count = 0
 
-    data1 = _load_from_tar(tar_path1, selected1, max_slices=max_slices, size=size)
-    data2 = _load_from_tar(tar_path2, selected2, max_slices=max_slices, size=size)
+        for subject in common_subjects:
+            m1 = subjects1[subject]
+            m2 = subjects2[subject]
 
-    # truncate to same number of slices
-    min_len = min(len(data1), len(data2))
-    data1 = data1[:min_len]
-    data2 = data2[:min_len]
+            # Extract bytes
+            fobj1 = tar1.extractfile(m1)
+            fobj2 = tar2.extractfile(m2)
+            if fobj1 is None or fobj2 is None:
+                continue
+            bytes1 = fobj1.read()
+            bytes2 = fobj2.read()
+            if m1.name.endswith(".gz"):
+                bytes1 = gzip.decompress(bytes1)
+            if m2.name.endswith(".gz"):
+                bytes2 = gzip.decompress(bytes2)
 
-    return torch.utils.data.TensorDataset(torch.from_numpy(data1), torch.from_numpy(data2))
+            img1 = nib.Nifti1Image.from_bytes(bytes1)
+            img2 = nib.Nifti1Image.from_bytes(bytes2)
+            vol1 = img1.get_fdata()
+            vol2 = img2.get_fdata()
+
+            # Zorg dat shapes gelijk zijn in z
+            z_len = min(vol1.shape[2], vol2.shape[2])
+            z0 = z_len // 4
+            z1 = z_len - z0
+
+            for z in range(z0, z1):
+                sl1 = _crop_or_pad(vol1[:, :, z], size=size).astype(np.float32)
+                sl2 = _crop_or_pad(vol2[:, :, z], size=size).astype(np.float32)
+
+                x_list.append(sl1)
+                y_list.append(sl2)
+                count += 1
+                if max_slices is not None and count >= max_slices:
+                    break
+            if max_slices is not None and count >= max_slices:
+                break
+
+    # Stapel en normaliseer
+    x = np.stack(x_list)[:, None, :, :]
+    y = np.stack(y_list)[:, None, :, :]
+
+    # Normaliseren
+    for arr in [x, y]:
+        arr -= arr.min()
+        if arr.max() > 0:
+            arr /= arr.max()
+        arr[:] = (arr - 0.5) / 0.5
+
+    return torch.utils.data.TensorDataset(torch.from_numpy(x), torch.from_numpy(y))
+
