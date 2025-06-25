@@ -88,6 +88,22 @@ def _reorient_to_RAS(data, affine):
     return orientations.apply_orientation(data, transform)
 
 
+from nibabel import orientations
+import numpy.linalg as la
+
+def _reorient_to_RAS(data, affine):
+    orig_ornt = orientations.io_orientation(affine)
+    ras_ornt = orientations.axcodes2ornt(('R', 'A', 'S'))
+    transform = orientations.ornt_transform(orig_ornt, ras_ornt)
+    return orientations.apply_orientation(data, transform), transform
+
+
+def _world_z_slices(affine, shape, transform):
+    # Bereken fysieke z-positie per slice
+    inv_transform = orientations.inv_ornt_aff(transform, shape)
+    coords = [np.dot(affine, inv_transform @ np.array([0, 0, z, 1])) for z in range(shape[2])]
+    return np.array([c[2] for c in coords])  # pak alleen de Z-coördinaat in wereldruimte
+
 def CreateDatasetSynthesis(phase, input_path, contrast1="T1", contrast2="T2", max_slices=None, size=256):
     tar_path1 = os.path.join(input_path, f"IXI_{contrast1}.tar")
     tar_path2 = os.path.join(input_path, f"IXI_{contrast2}.tar")
@@ -95,16 +111,13 @@ def CreateDatasetSynthesis(phase, input_path, contrast1="T1", contrast2="T2", ma
     if nib is None:
         raise ImportError("nibabel is required")
 
-    # Open tar-bestanden
     with tarfile.open(tar_path1, "r") as tar1, tarfile.open(tar_path2, "r") as tar2:
         members1 = [m for m in tar1.getmembers() if m.isfile()]
         members2 = [m for m in tar2.getmembers() if m.isfile()]
 
-        # Subject ID → member mapping
         subjects1 = { _extract_subject_id(m.name): m for m in members1 if _extract_subject_id(m.name) }
         subjects2 = { _extract_subject_id(m.name): m for m in members2 if _extract_subject_id(m.name) }
 
-        # Gemeenschappelijke subjects
         common_subjects = sorted(set(subjects1.keys()) & set(subjects2.keys()))
 
         x_list, y_list = [], []
@@ -114,7 +127,6 @@ def CreateDatasetSynthesis(phase, input_path, contrast1="T1", contrast2="T2", ma
             m1 = subjects1[subject]
             m2 = subjects2[subject]
 
-            # Extract bytes
             fobj1 = tar1.extractfile(m1)
             fobj2 = tar2.extractfile(m2)
             if fobj1 is None or fobj2 is None:
@@ -129,26 +141,27 @@ def CreateDatasetSynthesis(phase, input_path, contrast1="T1", contrast2="T2", ma
             img1 = nib.Nifti1Image.from_bytes(bytes1)
             img2 = nib.Nifti1Image.from_bytes(bytes2)
 
-            vol1 = _reorient_to_RAS(img1.get_fdata(), img1.affine)
-            vol2 = _reorient_to_RAS(img2.get_fdata(), img2.affine)
+            vol1, t1_ornt = _reorient_to_RAS(img1.get_fdata(), img1.affine)
+            vol2, t2_ornt = _reorient_to_RAS(img2.get_fdata(), img2.affine)
 
-            z_len = min(vol1.shape[2], vol2.shape[2])
-            z0 = z_len // 4
-            z1 = z_len - z0
+            z1_world = _world_z_slices(img1.affine, img1.shape, t1_ornt)
+            z2_world = _world_z_slices(img2.affine, img2.shape, t2_ornt)
 
-            for z in range(z0, z1):
-                sl1 = _crop_or_pad(vol1[:, :, z], size=size).astype(np.float32)
-                sl2 = _crop_or_pad(vol2[:, :, z], size=size).astype(np.float32)
+            target_z = np.median(z1_world)
 
-                x_list.append(sl1)
-                y_list.append(sl2)
-                count += 1
-                if max_slices is not None and count >= max_slices:
-                    break
+            # Zoek dichtstbijzijnde slice in beide volumes
+            z1_idx = np.argmin(np.abs(z1_world - target_z))
+            z2_idx = np.argmin(np.abs(z2_world - target_z))
+
+            sl1 = _crop_or_pad(vol1[:, :, z1_idx], size=size).astype(np.float32)
+            sl2 = _crop_or_pad(vol2[:, :, z2_idx], size=size).astype(np.float32)
+
+            x_list.append(sl1)
+            y_list.append(sl2)
+            count += 1
             if max_slices is not None and count >= max_slices:
                 break
 
-    # Stack en normaliseer
     x = np.stack(x_list)[:, None, :, :]
     y = np.stack(y_list)[:, None, :, :]
 
