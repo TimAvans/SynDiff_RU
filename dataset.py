@@ -27,7 +27,7 @@ class SynDiffDataset(torch.utils.data.Dataset):
         t2_subjects = {extract_subject_id(f): f for f in self.contrast2_files}
         self.common_subjects = sorted(set(t1_subjects.keys()) & set(t2_subjects.keys()))
 
-        # Build list of (subject, slice_idx) pairs
+        # Build list of (subject, slice_idx) pairs (middle 50% only)
         self.pairs = []
         for subj in self.common_subjects:
             t1_file = t1_subjects[subj]
@@ -42,7 +42,10 @@ class SynDiffDataset(torch.utils.data.Dataset):
                 os.unlink(tmp1.name)
                 os.unlink(tmp2.name)
             num_slices = min(t1_img.shape[2], t2_img.shape[2])
-            for z in range(num_slices):
+            # Only use the middle 50% of slices
+            start = num_slices // 4
+            end = start + num_slices // 2
+            for z in range(start, end):
                 self.pairs.append((subj, z))
 
     def __len__(self):
