@@ -9,7 +9,7 @@ class SavedDataset(Dataset):
         Initialize the dataset with a single .npy file containing preprocessed (x, y) pairs.
         
         Args:
-            file_path (str): Path to the .npy file (e.g., /content/drive/MyDrive/IXI_processed_dataset_full.npy).
+            file_path (str): Path to the .npy file .
         """
         self.file_path = file_path
         # Load the data once and store it (assuming it fits in memory; use lazy loading if needed)

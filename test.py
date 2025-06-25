@@ -10,6 +10,8 @@ from backbones.ncsnpp_generator_adagn import NCSNpp
 from dataset import CreateDatasetSynthesis
 from saved_dataset import SavedDataset
 
+from torch.utils.data import Subset
+
 import torch.nn.functional as F
 
 import torchvision.transforms as transforms
@@ -158,6 +160,10 @@ def sample_and_test(args):
     #loading dataset
     phase='test'
     dataset = SavedDataset(file_path=os.path.join(args.input_path, "IXI_processed_dataset_full.npy"))
+    # added this for faster testing
+    if args.num_test_samples is not None:
+        dataset = Subset(dataset, range(args.num_test_samples))
+        
     data_loader = torch.utils.data.DataLoader(dataset,
                                                batch_size=1,
                                                shuffle=False,
@@ -188,53 +194,38 @@ def sample_and_test(args):
     loss2 = np.zeros((1,len(data_loader)))
     syn_im1=np.zeros((256,256,len(data_loader)))
     syn_im2=np.zeros((256,256,len(data_loader)))
-    for iteration, (x , y) in enumerate(data_loader): 
-        
-        real_data = x.to(device, non_blocking=True)
-        source_data = y.to(device, non_blocking=True)
-        
-        x1_t = torch.cat((torch.randn_like(real_data),source_data),axis=1)
-        #diffusion steps
-        fake_sample1 = sample_from_model(pos_coeff, gen_diffusive_1, args.num_timesteps, x1_t, T, args)
-    
-        fake_sample1 = to_range_0_1(fake_sample1) ; fake_sample1 = fake_sample1/fake_sample1.max()
-        real_data = to_range_0_1(real_data) ; real_data = real_data/real_data.max()
-        source_data = to_range_0_1(source_data); source_data = source_data/source_data.max() 
-        
-        
-        #fake_sample1 = crop(fake_sample1) 
-        #real_data = crop(real_data)
-        #source_data = crop(source_data) 
-        syn_im1[:,:,iteration]=np.squeeze(fake_sample1.cpu().numpy())
-        
-        loss1[0, iteration] = psnr(fake_sample1, real_data).cpu().numpy()
-        print(str(iteration))
-        fake_sample1 = torch.cat((source_data, fake_sample1, real_data),axis=-1)
-        torchvision.utils.save_image(fake_sample1, '{}/{}_samples1_{}.jpg'.format(save_dir, phase, iteration), normalize=True)
+    for iteration, (x, y) in enumerate(data_loader):
+        # x: args.contrast1, y: args.contrast2
 
-    for iteration, (x , y) in enumerate(data_loader): 
-        
-        real_data = y.to(device, non_blocking=True)
-        source_data = x.to(device, non_blocking=True)
-        
-        x2_t = torch.cat((torch.randn_like(real_data),source_data),axis=1)
-        #diffusion steps
-        fake_sample2 = sample_from_model(pos_coeff, gen_diffusive_2, args.num_timesteps, x2_t, T, args)
-    
-        
-        fake_sample2 = to_range_0_1(fake_sample2) ; fake_sample2 = fake_sample2/fake_sample2.max()
-        real_data = to_range_0_1(real_data) ; real_data = real_data/real_data.max()
-        source_data = to_range_0_1(source_data); source_data = source_data/source_data.max() 
-        
-        #fake_sample2 = crop(fake_sample2) 
-        #real_data = crop(real_data)
-        #source_data = crop(source_data)
-        syn_im2[:,:,iteration]=np.squeeze(fake_sample2.cpu().numpy()) 
-        
-        loss2[0, iteration] = psnr(fake_sample2, real_data).cpu().numpy()
-        print(str(iteration))
-        fake_sample2 = torch.cat((source_data, fake_sample2, real_data),axis=-1)
-        torchvision.utils.save_image(fake_sample2, '{}/{}_samples2_{}.jpg'.format(save_dir, phase, iteration), normalize=True)
+        # contrast1 → contrast2 direction
+        real_data_c2 = y.to(device, non_blocking=True)
+        source_data_c1 = x.to(device, non_blocking=True)
+        x_t = torch.cat((torch.randn_like(real_data_c2), source_data_c1), axis=1)
+        fake_sample_c2 = sample_from_model(pos_coeff, gen_diffusive_2, args.num_timesteps, x_t, T, args)
+        fake_sample_c2 = to_range_0_1(fake_sample_c2) / (fake_sample_c2.max() + 1e-8)
+        real_data_c2 = to_range_0_1(real_data_c2) / (real_data_c2.max() + 1e-8)
+        source_data_c1 = to_range_0_1(source_data_c1) / (source_data_c1.max() + 1e-8)
+        loss2[0, iteration] = psnr(fake_sample_c2, real_data_c2).cpu().numpy()
+        torchvision.utils.save_image(
+            torch.cat((source_data_c1, fake_sample_c2, real_data_c2), axis=-1),
+            f'{save_dir}/{phase}_samples_{args.contrast1}to{args.contrast2}_{iteration}.jpg',
+            normalize=True
+        )
+
+        # contrast2 → contrast1 direction
+        real_data_c1 = x.to(device, non_blocking=True)
+        source_data_c2 = y.to(device, non_blocking=True)
+        x_t = torch.cat((torch.randn_like(real_data_c1), source_data_c2), axis=1)
+        fake_sample_c1 = sample_from_model(pos_coeff, gen_diffusive_1, args.num_timesteps, x_t, T, args)
+        fake_sample_c1 = to_range_0_1(fake_sample_c1) / (fake_sample_c1.max() + 1e-8)
+        real_data_c1 = to_range_0_1(real_data_c1) / (real_data_c1.max() + 1e-8)
+        source_data_c2 = to_range_0_1(source_data_c2) / (source_data_c2.max() + 1e-8)
+        loss1[0, iteration] = psnr(fake_sample_c1, real_data_c1).cpu().numpy()
+        torchvision.utils.save_image(
+            torch.cat((source_data_c2, fake_sample_c1, real_data_c1), axis=-1),
+            f'{save_dir}/{phase}_samples_{args.contrast2}to{args.contrast1}_{iteration}.jpg',
+            normalize=True
+        )
 
     print(np.nanmean(loss1))
     np.save('{}/psnr_values1.npy'.format(save_dir), loss1)
@@ -336,7 +327,11 @@ if __name__ == '__main__':
 
 
     parser.add_argument('--source', type=str, default='T2',
-                        help='source contrast')   
+                        help='source contrast')
+    
+    # test parameters
+    parser.add_argument('--num_test_samples', type=int, default=None, help='Number of test samples to run')
+
     args = parser.parse_args()
     
     sample_and_test(args)
