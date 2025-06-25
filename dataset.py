@@ -70,9 +70,16 @@ class SynDiffDataset(torch.utils.data.Dataset):
         y = t2_data[z % t2_data.shape[0]]
         return x, y
 
+
+    # Load a single NIfTI file and extract slices
     def LoadDataSet(self, file_path):
         img = nib.load(file_path)
-        data = img.get_fdata()  # 3D array [x, y, z]
+        # Reorient to RAS+ (axial) orientation
+        orig_ornt = nib.orientations.io_orientation(img.affine)
+        target_ornt = nib.orientations.axcodes2ornt(('R', 'A', 'S'))
+        transform = nib.orientations.ornt_transform(orig_ornt, target_ornt)
+        data = img.get_fdata()
+        data = nib.orientations.apply_orientation(data, transform)
         slices = []
         for z in range(data.shape[2]):
             slice_data = data[:, :, z]
