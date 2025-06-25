@@ -160,8 +160,7 @@ def sample_and_test(args):
 
     #loading dataset
     phase='test'
-    dataset=CreateDatasetSynthesis_original('test', args.input_path, args.contrast1, args.contrast2)
-    # added this for faster testing
+    dataset = CreateDatasetSynthesis_original(phase, args.input_path, contrast1='T1', contrast2='T2')
     if args.num_test_samples is not None:
         dataset = Subset(dataset, range(args.num_test_samples))
 
