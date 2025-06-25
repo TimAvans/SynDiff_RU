@@ -1,6 +1,7 @@
 import torch.utils.data
 import numpy as np
 import nibabel as nib
+from nilearn.image import resample_to_img
 import os
 import tarfile
 import tempfile
@@ -63,7 +64,7 @@ class SynDiffDataset(torch.utils.data.Dataset):
             t1_img = nib.load(tmp1.name)
             t2_img = nib.load(tmp2.name)
             # Resample T2 to T1's grid
-            t2_img_resampled = nib.processing.resample_from_to(t2_img, t1_img)
+            t2_img_resampled = resample_to_img(t2_img, t1_img, interpolation='continuous')
             # Reorient both to RAS+
             t1_data = self._reorient_to_ras(t1_img)
             t2_data = self._reorient_to_ras(t2_img_resampled)
