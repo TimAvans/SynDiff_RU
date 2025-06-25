@@ -1,7 +1,6 @@
 import torch.utils.data
 import numpy as np
 import nibabel as nib
-from nilearn.image import resample_to_img
 import os
 import tarfile
 import tempfile
@@ -54,49 +53,22 @@ class SynDiffDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         subj, z = self.pairs[idx]
+        # Find file names
         t1_file = [f for f in self.contrast1_files if subj in f][0]
         t2_file = [f for f in self.contrast2_files if subj in f][0]
+        # Load slices
         with tempfile.NamedTemporaryFile(delete=False, suffix='.nii.gz') as tmp1, \
              tempfile.NamedTemporaryFile(delete=False, suffix='.nii.gz') as tmp2:
             tmp1.write(self.tar_t1.extractfile(t1_file).read())
             tmp2.write(self.tar_t2.extractfile(t2_file).read())
-            # Load both images
-            t1_img = nib.load(tmp1.name)
-            t2_img = nib.load(tmp2.name)
-            # Resample T2 to T1's grid
-            t2_img_resampled = resample_to_img(t2_img, t1_img, interpolation='continuous')
-            # Reorient both to RAS+
-            t1_data = self._reorient_to_ras(t1_img)
-            t2_data = self._reorient_to_ras(t2_img_resampled)
+            t1_data = self.LoadDataSet(tmp1.name)
+            t2_data = self.LoadDataSet(tmp2.name)
             os.unlink(tmp1.name)
             os.unlink(tmp2.name)
         # Get the z-th slice
         x = t1_data[z % t1_data.shape[0]]
         y = t2_data[z % t2_data.shape[0]]
         return x, y
-
-    def _reorient_to_ras(self, img):
-        orig_ornt = nib.orientations.io_orientation(img.affine)
-        target_ornt = nib.orientations.axcodes2ornt(('R', 'A', 'S'))
-        transform = nib.orientations.ornt_transform(orig_ornt, target_ornt)
-        data = img.get_fdata()
-        data = nib.orientations.apply_orientation(data, transform)
-        slices = []
-        for z in range(data.shape[2]):
-            slice_data = data[:, :, z]
-            slice_data = np.expand_dims(slice_data, axis=0)  # [1, H, W]
-            slices.append(slice_data)
-        data = np.stack(slices, axis=0)  # [num_slices, 1, H, W]
-        data = data.astype(np.float32)
-        if self.padding:
-            pad_x = int((256 - data.shape[2]) / 2)
-            pad_y = int((256 - data.shape[3]) / 2)
-            if pad_x > 0 or pad_y > 0:
-                data = np.pad(data, ((0, 0), (0, 0), (pad_x, pad_x), (pad_y, pad_y)))
-        if self.Norm:
-            data = (data - np.mean(data)) / np.std(data)
-            data = data * 2 - 1
-        return data
 
 
     # Load a single NIfTI file and extract slices
