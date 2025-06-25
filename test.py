@@ -160,7 +160,7 @@ def sample_and_test(args):
 
     #loading dataset
     phase='test'
-    dataset = CreateDatasetSynthesis_original(phase, args.input_path, contrast1='T1', contrast2='T2')
+    dataset = SavedDataset(file_path=os.path.join(args.input_path, "IXI_processed_dataset_full.npy"))
     if args.num_test_samples is not None:
         dataset = Subset(dataset, range(args.num_test_samples))
 
