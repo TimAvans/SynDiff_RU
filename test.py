@@ -177,9 +177,10 @@ def sample_and_test(args):
     exp_path = os.path.join(output_dir,exp)
 
     checkpoint_file = exp_path + "/{}_{}.pth"
-    load_checkpoint(checkpoint_file, gen_diffusive_1,'gen_diffusive_1',epoch=str(epoch_chosen), device = device)
-    load_checkpoint(checkpoint_file, gen_diffusive_2,'gen_diffusive_2',epoch=str(epoch_chosen), device = device)
-
+    load_checkpoint(checkpoint_file, gen_diffusive_1, 'gen_diffusive_1', epoch=str(epoch_chosen), device=device)
+    print(f"Loaded gen_diffusive_1 from {checkpoint_file.format('gen_diffusive_1', epoch_chosen)}")
+    load_checkpoint(checkpoint_file, gen_diffusive_2, 'gen_diffusive_2', epoch=str(epoch_chosen), device=device)
+    print(f"Loaded gen_diffusive_2 from {checkpoint_file.format('gen_diffusive_2', epoch_chosen)}")
 
     T = get_time_schedule(args, device)
     
