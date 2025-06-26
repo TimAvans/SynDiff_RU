@@ -18,15 +18,13 @@ def _reorient_to_RAS(data, affine):
     ras_ornt = orientations.axcodes2ornt(('R', 'A', 'S'))
     transform = orientations.ornt_transform(orig_ornt, ras_ornt)
     return orientations.apply_orientation(data, transform), transform
+
 def _world_z_slices(affine, shape, orientation):
-    """Calculate world Z positions of slices in the volume."""
-    z_slices = np.arange(shape[2])
-    z_world = orientations.apply_orientation(np.column_stack((np.zeros_like(z_slices), 
-                                                              np.zeros_like(z_slices), 
-                                                              z_slices)), 
-                                              orientation)
-    z_world = np.dot(z_world, affine[:3, :3].T) + affine[:3, 3]
-    return z_world[:, 2]  # Return only the Z component
+    # Bepaal hoe oriëntatie en affine samen de Z-as beïnvloeden
+    inv_transform = orientations.inv_ornt_aff(orientation, shape)
+    coords = [affine @ (inv_transform @ np.array([0, 0, z, 1])) for z in range(shape[2])]
+    return np.array([c[2] for c in coords])  # Z-positie in wereldruimte
+
 
 def _crop_or_pad(img, size=256):
     h, w = img.shape
