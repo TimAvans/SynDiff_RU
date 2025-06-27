@@ -9,7 +9,7 @@ import torchvision
 from backbones.ncsnpp_generator_adagn import NCSNpp
 from dataset_big import CreateDatasetSynthesis
 from saved_dataset import SavedDataset
-
+from skimage.metrics import structural_similarity as ssim_metric
 from torch.utils.data import Subset
 
 import torch.nn.functional as F
@@ -21,6 +21,11 @@ def psnr(img1, img2):
 
     mse = torch.mean((img1 - img2) ** 2)
     return 20 * torch.log10(img1.max() / torch.sqrt(mse))
+
+def ssim(img1, img2):
+    img1_np = img1.squeeze().detach().cpu().numpy()
+    img2_np = img2.squeeze().detach().cpu().numpy()
+    return ssim_metric(img1_np, img2_np, data_range=img2_np.max() - img2_np.min())
 
         
 #%% Diffusion coefficients 
@@ -192,12 +197,13 @@ def sample_and_test(args):
         os.makedirs(save_dir)
     loss1 = np.zeros((1,len(data_loader)))
     loss2 = np.zeros((1,len(data_loader)))
+    ssim1 = []
+    ssim2 = []
+
     syn_im1=np.zeros((256,256,len(data_loader)))
     syn_im2=np.zeros((256,256,len(data_loader)))
-    for iteration, (x, y) in enumerate(data_loader):
-        # x: args.contrast1, y: args.contrast2
 
-        # contrast1 → contrast2 direction
+    for iteration, (x, y) in enumerate(data_loader):
         real_data_c2 = y.to(device, non_blocking=True)
         source_data_c1 = x.to(device, non_blocking=True)
         x_t = torch.cat((torch.randn_like(real_data_c2), source_data_c1), axis=1)
@@ -205,14 +211,18 @@ def sample_and_test(args):
         fake_sample_c2 = to_range_0_1(fake_sample_c2) / (fake_sample_c2.max() + 1e-8)
         real_data_c2 = to_range_0_1(real_data_c2) / (real_data_c2.max() + 1e-8)
         source_data_c1 = to_range_0_1(source_data_c1) / (source_data_c1.max() + 1e-8)
+
         loss2[0, iteration] = psnr(fake_sample_c2, real_data_c2).cpu().numpy()
+        ssim_val2 = ssim(fake_sample_c2, real_data_c2)
+        ssim2.append(ssim_val2)
+        print(f"PSNR {args.contrast1}->{args.contrast2} {iteration}: {loss2[0, iteration]:.4f} | SSIM: {ssim_val2:.4f}")
+
         torchvision.utils.save_image(
             torch.cat((source_data_c1, fake_sample_c2, real_data_c2), axis=-1),
             f'{save_dir}/{phase}_samples_{args.contrast1}to{args.contrast2}_{iteration}.jpg',
             normalize=True
         )
 
-        # contrast2 → contrast1 direction
         real_data_c1 = x.to(device, non_blocking=True)
         source_data_c2 = y.to(device, non_blocking=True)
         x_t = torch.cat((torch.randn_like(real_data_c1), source_data_c2), axis=1)
@@ -220,23 +230,30 @@ def sample_and_test(args):
         fake_sample_c1 = to_range_0_1(fake_sample_c1) / (fake_sample_c1.max() + 1e-8)
         real_data_c1 = to_range_0_1(real_data_c1) / (real_data_c1.max() + 1e-8)
         source_data_c2 = to_range_0_1(source_data_c2) / (source_data_c2.max() + 1e-8)
+
         loss1[0, iteration] = psnr(fake_sample_c1, real_data_c1).cpu().numpy()
+        ssim_val1 = ssim(fake_sample_c1, real_data_c1)
+        ssim1.append(ssim_val1)
+        print(f"PSNR {args.contrast2}->{args.contrast1} {iteration}: {loss1[0, iteration]:.4f} | SSIM: {ssim_val1:.4f}")
+
         torchvision.utils.save_image(
             torch.cat((source_data_c2, fake_sample_c1, real_data_c1), axis=-1),
             f'{save_dir}/{phase}_samples_{args.contrast2}to{args.contrast1}_{iteration}.jpg',
             normalize=True
         )
 
-    print(np.nanmean(loss1))
-    np.save('{}/psnr_values1.npy'.format(save_dir), loss1)
+    print("\nFinal Results:")
+    print(f"Avg PSNR {args.contrast1}->{args.contrast2}: {np.nanmean(loss2):.4f} | Avg SSIM: {np.mean(ssim2):.4f}")
+    print(f"Avg PSNR {args.contrast2}->{args.contrast1}: {np.nanmean(loss1):.4f} | Avg SSIM: {np.mean(ssim1):.4f}")
 
-    print(np.nanmean(loss2))
+    np.save('{}/psnr_values1.npy'.format(save_dir), loss1)
     np.save('{}/psnr_values2.npy'.format(save_dir), loss2)
 
     f = h5py.File(save_dir + '/im_syn.mat',  "w")
     f.create_dataset('images_'+args.contrast1+'syn', data=syn_im1)
     f.create_dataset('images_'+args.contrast2+'syn', data=syn_im2)
     f.close()
+
             
 
 if __name__ == '__main__':
