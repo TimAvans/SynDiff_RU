@@ -5,11 +5,8 @@ import re
 import numpy as np
 import torch.utils.data
 
-try:
-    import nibabel as nib
-    from nibabel import orientations
-except ImportError:
-    nib = None
+import nibabel as nib
+from nibabel import orientations
 
 def _crop_or_pad(img, size=256):
     h, w = img.shape
@@ -34,17 +31,15 @@ def _extract_subject_id(name):
     match = re.match(r"(IXI\d+)", os.path.basename(name))
     return match.group(1) if match else None
 
-def _is_axial(affine):
-    """Check if image has axial orientation ('R', 'A', 'S')."""
-    orientation = orientations.ornt2axcodes(orientations.io_orientation(affine))
-    return orientation == ('R', 'A', 'S')
+def _reorient_to_RAS(data, affine):
+    ornt = orientations.io_orientation(affine)
+    ras_ornt = orientations.axcodes2ornt(('R', 'A', 'S'))
+    transform = orientations.ornt_transform(ornt, ras_ornt)
+    return orientations.apply_orientation(data, transform)
 
 def CreateDatasetSynthesis(phase, input_path, contrast1="T1", contrast2="T2", max_slices=None, size=256):
     tar_path1 = os.path.join(input_path, f"IXI_{contrast1}.tar")
     tar_path2 = os.path.join(input_path, f"IXI_{contrast2}.tar")
-
-    if nib is None:
-        raise ImportError("nibabel is required")
 
     with tarfile.open(tar_path1, "r") as tar1, tarfile.open(tar_path2, "r") as tar2:
         members1 = [m for m in tar1.getmembers() if m.isfile()]
@@ -76,15 +71,13 @@ def CreateDatasetSynthesis(phase, input_path, contrast1="T1", contrast2="T2", ma
             img1 = nib.Nifti1Image.from_bytes(bytes1)
             img2 = nib.Nifti1Image.from_bytes(bytes2)
 
-            # Skip non-axial scans
-            if not (_is_axial(img1.affine) and _is_axial(img2.affine)):
-                continue
-
-            vol1 = img1.get_fdata()
-            vol2 = img2.get_fdata()
+            vol1 = _reorient_to_RAS(img1.get_fdata(), img1.affine)
+            vol2 = _reorient_to_RAS(img2.get_fdata(), img2.affine)
 
             min_slices = min(vol1.shape[2], vol2.shape[2])
-            for z in range(min_slices):
+            start = min_slices // 4
+            end = start + (min_slices // 2)
+            for z in range(start, end):
                 sl1 = _crop_or_pad(vol1[:, :, z], size=size).astype(np.float32)
                 sl2 = _crop_or_pad(vol2[:, :, z], size=size).astype(np.float32)
 
@@ -95,6 +88,9 @@ def CreateDatasetSynthesis(phase, input_path, contrast1="T1", contrast2="T2", ma
                     break
             if max_slices is not None and count >= max_slices:
                 break
+
+    if not x_list:
+        raise ValueError("No usable slices found. Check data or orientation handling.")
 
     x = np.stack(x_list)[:, None, :, :]
     y = np.stack(y_list)[:, None, :, :]
