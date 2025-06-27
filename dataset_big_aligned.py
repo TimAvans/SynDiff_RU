@@ -6,7 +6,7 @@ import numpy as np
 import torch.utils.data
 import nibabel as nib
 from nibabel import orientations
-import SimpleITK as sitk
+from skimage.metrics import normalized_mutual_information as skimage_nmi
 
 def _crop_or_pad(img, size=256):
     h, w = img.shape
@@ -38,22 +38,16 @@ def _reorient_to_RAS(data, affine):
     return orientations.apply_orientation(data, transform)
 
 def _compute_mi(slice1, slice2):
-    fixed = sitk.GetImageFromArray(slice1.astype(np.float32))
-    moving = sitk.GetImageFromArray(slice2.astype(np.float32))
+    """Snelle mutual information schatting met skimage."""
+    # Flatten de slices voor 1D verwerking
+    slice1 = slice1.flatten()
+    slice2 = slice2.flatten()
 
-    registration = sitk.ImageRegistrationMethod()
-    registration.SetMetricAsMattesMutualInformation(numberOfHistogramBins=50)
-    registration.SetOptimizerAsRegularStepGradientDescent(learningRate=1.0,
-                                                           minStep=1e-4,
-                                                           numberOfIterations=50)
-    registration.SetInitialTransform(sitk.TranslationTransform(fixed.GetDimension()))
-    registration.SetInterpolator(sitk.sitkLinear)
+    # Normaliseer (optioneel, verhoogt stabiliteit)
+    slice1 = (slice1 - slice1.min()) / (slice1.max() - slice1.min() + 1e-8)
+    slice2 = (slice2 - slice2.min()) / (slice2.max() - slice2.min() + 1e-8)
 
-    try:
-        registration.Execute(fixed, moving)
-        return registration.GetMetricValue()
-    except:
-        return 0.0
+    return skimage_nmi(slice1, slice2)
 
 def CreateDatasetSynthesis(phase, input_path, contrast1="T1", contrast2="T2", max_slices=None, size=256, mi_threshold=0.15):
     tar_path1 = os.path.join(input_path, f"IXI_{contrast1}.tar")
@@ -95,6 +89,8 @@ def CreateDatasetSynthesis(phase, input_path, contrast1="T1", contrast2="T2", ma
             min_slices = min(vol1.shape[2], vol2.shape[2])
             start = min_slices // 4
             end = start + (min_slices // 2)
+            print(f"Processing subject {subject}, {count} slices collected so far...")
+
             for z in range(start, end):
                 sl1 = _crop_or_pad(vol1[:, :, z], size=size).astype(np.float32)
                 sl2 = _crop_or_pad(vol2[:, :, z], size=size).astype(np.float32)
