@@ -7,8 +7,7 @@ import os
 import torch.optim as optim
 import torchvision
 from backbones.ncsnpp_generator_adagn import NCSNpp
-from dataset_big_aligned import CreateDatasetSynthesisAligned as CreateDatasetSynthesis
-
+from dataset_big import CreateDatasetSynthesis
 from saved_dataset import SavedDataset
 from skimage.metrics import structural_similarity as ssim_metric
 from torch.utils.data import Subset
