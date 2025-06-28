@@ -9,7 +9,6 @@ import torchvision
 from backbones.ncsnpp_generator_adagn import NCSNpp
 from saved_dataset import CreateDatasetSynthesis
 
-from saved_dataset import SavedDataset
 from skimage.metrics import structural_similarity as ssim_metric
 from torch.utils.data import Subset
 
